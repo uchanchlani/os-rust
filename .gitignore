@@ -1,2 +1,5 @@
 /target
 **/*.rs.bk
+
+# Intellij files, because hey you need an IDE
+.idea/
