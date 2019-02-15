@@ -18,6 +18,6 @@ fn panic(_info: &PanicInfo) -> ! {
     serial_println!("ok");
 
     unsafe { exit_qemu(); }
-    loop {}
+    blog_os::hlt_loop();
 }
 
