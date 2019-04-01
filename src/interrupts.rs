@@ -8,7 +8,7 @@ use x86_64::{
     }
 };
 use crate::{serial_println, println, print, gdt, hlt_loop};
-use crate::page_table::page_fault_handler;
+use crate::process_table::page_fault_handler;
 use lazy_static::lazy_static;
 use pic8259_simple::ChainedPics;
 use spin;

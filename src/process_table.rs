@@ -1,4 +1,4 @@
-#![feature(const_raw_ptr_deref)]
+//#![feature(const_raw_ptr_deref)]
 
 use x86_64::{
     registers::control::Cr3,
@@ -26,7 +26,7 @@ use crate::{
 };
 use x86_64::structures::paging::{Mapper, Page};
 
-pub static mut CURR_PAGE_TABLE : *mut ProcessTable = 0x0 as *mut ProcessTable;
+pub static mut CURR_PROCESS_TABLE: *mut ProcessTable = 0x0 as *mut ProcessTable;
 
 #[repr(C)]
 pub struct ProcessTable {
@@ -65,9 +65,6 @@ impl ProcessTable {
         dest_table1.zero();
         dest_table1[0].set_addr(source_table1[0].addr(), source_table1[0].flags());
 
-//        unsafe {print_pg_tables(p3_addr_vir.as_u64());}
-        unsafe {print_pg_tables(self.page_directory.as_u64());}
-
     }
 
     pub fn new() -> &'static mut Self {
@@ -91,36 +88,27 @@ impl ProcessTable {
 
     pub fn load(&'static mut self) -> &'static mut Self {
         unsafe {
-            CURR_PAGE_TABLE = &mut (*self);
-//            let value: u64;
-//            asm!("mov %cr3, $0" : "=r" (value));
-//            serial_println!("Raw cr3 value: {:x}", value);
-//
-//            serial_println!("Write to cr3: {:?} {:?}", self.pg_dir_phy, Cr3::read().1.bits());
+            CURR_PROCESS_TABLE = &mut (*self);
             Cr3::write(PhysFrame::containing_address(self.pg_dir_phy), Cr3::read().1);
-//            crate::hlt_loop();
         }
         self
     }
 
     pub fn handle_fault(_addr : VirtAddr) -> bool {
         unsafe {
-            let vm_pool = &(*CURR_PAGE_TABLE).vm_pool;
+            let vm_pool = &(*CURR_PROCESS_TABLE).vm_pool;
             if vm_pool.is_legitimate(_addr) {
-//                let mut rptr = get_rptr();
                 let level_4_table_ptr = crate::machine::L4_PAGE_TABLE_VADDR as *mut PageTable;
                 let level_4_table = &mut *level_4_table_ptr;
                 let mut rptr = RecursivePageTable::new(level_4_table).unwrap();
                 let option = crate::memory::get_frame(false, false);
                 if option.is_none() {
-                    serial_println!("returning false 1");
                     return false;
                 }
                 let frame = option.unwrap();
                 rptr.map_to(Page::containing_address(_addr), frame, Flags::PRESENT | Flags::WRITABLE, &mut *(crate::memory::SYSTEM_FRAME_POOL));
                 true
             } else {
-                serial_println!("returning false 2");
                 false
             }
         }
@@ -128,7 +116,6 @@ impl ProcessTable {
 
     pub fn free_page(_addr : VirtAddr) {
         unsafe {
-//            let mut rptr = get_rptr();
             let level_4_table_ptr = crate::machine::L4_PAGE_TABLE_VADDR as *mut PageTable;
             let level_4_table = &mut *level_4_table_ptr;
             let mut rptr = RecursivePageTable::new(level_4_table).unwrap();
@@ -176,7 +163,7 @@ pub extern "x86-interrupt" fn page_fault_handler(
         println!("EXCEPTION: PAGE FAULT");
         println!("Accessed Address: {:?}", addr);
         println!("{:#?}", stack_frame);
-        crate::hlt_loop();
+        panic!();
     }
 }
 

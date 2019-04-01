@@ -11,8 +11,9 @@ use x86_64::{
     PhysAddr
 };
 use bootloader::bootinfo::{MemoryMap, MemoryRegionType};
-//use crate::println;
+// @TODO
 use crate::serial_println;
+use crate::serial_print;
 use x86_64::structures::paging::FrameDeallocator;
 
 //const KERNEL_SPACE: u64 = 0x4_00000; // 4MB
@@ -141,6 +142,14 @@ impl SimpleFramePool {
             }
         }
     }
+
+    pub fn print_frame_map(& self) {
+        let x = self.frames;
+        for i in 155..170 {
+            serial_print!("{:08b} ", x[i]);
+        }
+        serial_println!("");
+    }
 }
 
 impl FrameAllocator<Size4KiB> for SimpleFramePool {
@@ -179,10 +188,7 @@ pub fn free_frame(frame : PhysFrame) {
 }
 
 pub fn print_frame_map() {
-    let x = unsafe {(*SYSTEM_FRAME_POOL).frames};
-    for i in 0..4080 {
-        serial_println!("{:08b}", x[i]);
-    }
+    unsafe {(*SYSTEM_FRAME_POOL).print_frame_map()};
 }
 
 //#[allow(dead_code)]
@@ -223,7 +229,6 @@ pub fn init_frame_allocator(
             };
         } else {
             unsafe {
-//                let user_frame_addr = transform_kernel_to_vir((*SYSTEM_FRAME_POOL).find_free_frame().unwrap().start_address());
                 let user_frame_addr = get_frame(true, false).unwrap().start_address();
                 USER_FRAME_POOL = user_frame_addr.as_u64() as *mut SimpleFramePool;
                 (*SYSTEM_FRAME_POOL).add_frame_pool(USER_FRAME_POOL);

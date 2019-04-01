@@ -9,7 +9,7 @@ pub mod serial;
 pub mod interrupts;
 pub mod gdt;
 pub mod memory;
-pub mod page_table;
+pub mod process_table;
 pub mod vm_pool;
 
 pub unsafe fn exit_qemu() {
@@ -21,17 +21,6 @@ pub unsafe fn exit_qemu() {
 
 
 pub fn hlt_loop() -> ! {
-    loop {
-        x86_64::instructions::hlt();
-    }
-}
-
-pub fn asdf() -> ! {
-    loop {
-        x86_64::instructions::hlt();
-    }
-}
-pub fn asdf1() -> ! {
     loop {
         x86_64::instructions::hlt();
     }

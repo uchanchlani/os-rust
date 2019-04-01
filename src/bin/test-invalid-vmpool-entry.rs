@@ -41,7 +41,11 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
         }
     }
 
-    serial_println!("ok");
+    x.release(addr);
+    let test_mem : &mut [u64; 10000] = unsafe {&mut *(addr.as_u64() as *mut [u64; 10000])}; // this should panic
+    test_mem[0] = 0;
+
+    serial_println!("failed");
 
     unsafe { exit_qemu(); }
     blog_os::hlt_loop();
@@ -50,10 +54,8 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 /// This function is called on panic.
 #[cfg(not(test))]
 #[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    serial_println!("failed");
-
-    serial_println!("{}", info);
+fn panic(_info: &PanicInfo) -> ! {
+    serial_println!("ok");
 
     unsafe { exit_qemu(); }
     blog_os::hlt_loop();

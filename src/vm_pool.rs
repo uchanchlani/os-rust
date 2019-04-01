@@ -1,4 +1,6 @@
-use crate::page_table::ProcessTable;
+use crate::{
+    process_table::ProcessTable
+};
 use x86_64::VirtAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +22,10 @@ impl VMPoolEntry {
     fn update_val(&mut self, start : VirtAddr, size : u64) {
         self.start = start;
         self.size = size;
+    }
+
+    fn free_entry(&mut self) {
+        self.update_val(VirtAddr::new(0), 0 as u64);
     }
 }
 
@@ -92,7 +98,7 @@ impl VMPool {
     }
 
     pub fn release(&mut self, addr: VirtAddr) {
-        for entry in self.entries.iter() {
+        for entry in self.entries.iter_mut() {
             if entry.start.as_u64() == 0 {
                 continue;
             } else if entry.start == addr {
@@ -101,6 +107,7 @@ impl VMPool {
                     free_addr += i*crate::machine::PAGE_SIZE;
                     ProcessTable::free_page(VirtAddr::new(free_addr));
                 }
+                entry.free_entry();
                 break;
             }
         }
