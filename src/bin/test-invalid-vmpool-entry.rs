@@ -22,7 +22,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     let _cr3 = x86_64::registers::control::Cr3::read();
 
-    blog_os::process_table::fixCr3();
+    blog_os::process_table::fix_cr3();
     blog_os::memory::init_frame_allocator(&boot_info.memory_map);
 
     let mut page_table : &'static mut ProcessTable = ProcessTable::new();
@@ -31,14 +31,8 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     let addr = x.allocate(core::mem::size_of::<[u64; 10000]>()).unwrap();
     let test_mem : &mut [u64; 10000] = unsafe {&mut *(addr.as_u64() as *mut [u64; 10000])};
 
-    for i in 0..10000 {
-        test_mem[i] = i as u64;
-    }
-
-    for i in 0..10000 {
-        if test_mem[i] != i as u64 {
-            panic!();
-        }
+    for i in 0..10 {
+        test_mem[i * 1000] = i as u64; // only map some memory locations and try to free all of them at the end
     }
 
     x.release(addr);

@@ -22,7 +22,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     let _cr3 = x86_64::registers::control::Cr3::read();
 
-    blog_os::process_table::fixCr3();
+    blog_os::process_table::fix_cr3();
     blog_os::memory::init_frame_allocator(&boot_info.memory_map);
 
     let mut page_table : &'static mut ProcessTable = ProcessTable::new();

@@ -2,18 +2,19 @@ use x86_64::{
     structures::{
         idt::{
             InterruptDescriptorTable,
-            ExceptionStackFrame,
-            PageFaultErrorCode
+            ExceptionStackFrame
         }
     }
 };
-use crate::{serial_println, println, print, gdt, hlt_loop};
-use crate::process_table::page_fault_handler;
+use crate::{
+    println,
+    print,
+    gdt,
+    process_table::page_fault_handler
+};
 use lazy_static::lazy_static;
 use pic8259_simple::ChainedPics;
 use spin;
-use x86_64::registers::control::Cr2;
-use x86_64::registers::control::Cr3;
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -72,21 +73,6 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
 
     unsafe { PICS.lock().notify_end_of_interrupt(KEYBOARD_INTERRUPT_ID) }
 }
-
-//pub extern "x86-interrupt" fn page_fault_handler(
-//    stack_frame: &mut ExceptionStackFrame,
-//    _error_code: PageFaultErrorCode,
-//) {
-//    let addr = Cr2::read();
-//
-//    serial_println!("PFault: {:?}", addr);
-//    serial_println!("PFault: {:?}", Cr3::read().0.start_address().as_u64());
-//    println!("EXCEPTION: PAGE FAULT");
-//    println!("Accessed Address: {:?}", addr);
-//    println!("{:#?}", stack_frame);
-//    hlt_loop();
-//}
-
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {

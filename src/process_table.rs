@@ -26,7 +26,28 @@ use crate::{
 };
 use x86_64::structures::paging::{Mapper, Page};
 
-pub static mut CURR_PROCESS_TABLE: *mut ProcessTable = 0x0 as *mut ProcessTable;
+static mut CURR_PROCESS_TABLE: *mut ProcessTable = 0x0 as *mut ProcessTable;
+
+#[allow(dead_code)]
+fn get_curr_process_table() -> &'static ProcessTable {
+    unsafe {
+        & (*CURR_PROCESS_TABLE)
+    }
+}
+
+#[allow(dead_code)]
+fn get_curr_process_table_mut() -> &'static mut ProcessTable {
+    unsafe {
+        &mut (*CURR_PROCESS_TABLE)
+    }
+}
+
+#[allow(dead_code)]
+fn set_curr_process_table(pt : &mut ProcessTable) {
+    unsafe {
+        CURR_PROCESS_TABLE = &mut (*pt)
+    }
+}
 
 #[repr(C)]
 pub struct ProcessTable {
@@ -35,7 +56,7 @@ pub struct ProcessTable {
     pub vm_pool : &'static mut VMPool
 }
 
-pub fn fixCr3() {
+pub fn fix_cr3() {
     unsafe {
         let frame = Cr3::read();
         Cr3::write(frame.0, Cr3Flags::PAGE_LEVEL_WRITETHROUGH);
@@ -45,7 +66,7 @@ pub fn fixCr3() {
 impl ProcessTable {
     fn construct_page_table(& self) {
         let pg_table_addr = self.page_directory;
-        let mut dest_table = unsafe {&mut *(pg_table_addr.as_u64() as *mut PageTable)};
+        let dest_table = unsafe {&mut *(pg_table_addr.as_u64() as *mut PageTable)};
         let source_table = unsafe{&mut *(crate::machine::L4_PAGE_TABLE_VADDR as *mut PageTable)};
         let p3_frame = crate::memory::get_frame(true, true).unwrap();
         dest_table.zero();
@@ -61,7 +82,7 @@ impl ProcessTable {
 
         let p3_addr_vir = crate::memory::transform_kernel_to_vir(p3_frame.start_address());
         let source_table1 = unsafe{&mut *(crate::machine::L3_PAGE_TABLE_VADDR as *mut PageTable)};
-        let mut dest_table1 = unsafe {&mut *(p3_addr_vir.as_u64() as *mut PageTable)};
+        let dest_table1 = unsafe {&mut *(p3_addr_vir.as_u64() as *mut PageTable)};
         dest_table1.zero();
         dest_table1[0].set_addr(source_table1[0].addr(), source_table1[0].flags());
 
@@ -87,8 +108,8 @@ impl ProcessTable {
     }
 
     pub fn load(&'static mut self) -> &'static mut Self {
+        set_curr_process_table(self);
         unsafe {
-            CURR_PROCESS_TABLE = &mut (*self);
             Cr3::write(PhysFrame::containing_address(self.pg_dir_phy), Cr3::read().1);
         }
         self
@@ -96,7 +117,7 @@ impl ProcessTable {
 
     pub fn handle_fault(_addr : VirtAddr) -> bool {
         unsafe {
-            let vm_pool = &(*CURR_PROCESS_TABLE).vm_pool;
+            let vm_pool = &get_curr_process_table().vm_pool;
             if vm_pool.is_legitimate(_addr) {
                 let level_4_table_ptr = crate::machine::L4_PAGE_TABLE_VADDR as *mut PageTable;
                 let level_4_table = &mut *level_4_table_ptr;
@@ -106,8 +127,9 @@ impl ProcessTable {
                     return false;
                 }
                 let frame = option.unwrap();
-                rptr.map_to(Page::containing_address(_addr), frame, Flags::PRESENT | Flags::WRITABLE, &mut *(crate::memory::SYSTEM_FRAME_POOL));
-                true
+                let result = rptr.map_to(Page::containing_address(_addr), frame, Flags::PRESENT | Flags::WRITABLE, crate::memory::get_frame_pool_mut(true));
+                result.is_ok()
+//                true
             } else {
                 false
             }
@@ -137,7 +159,7 @@ impl ProcessTable {
 }
 
 pub unsafe fn print_pg_tables(table: u64) {
-    let source_table = unsafe{&mut *(table as *mut PageTable)};
+    let source_table = &mut *(table as *mut PageTable);
     for i in 0..512 {
         let entry = &source_table[i];
         if !entry.is_unused() {

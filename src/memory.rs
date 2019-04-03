@@ -16,18 +16,12 @@ use crate::serial_println;
 use crate::serial_print;
 use x86_64::structures::paging::FrameDeallocator;
 
-//const KERNEL_SPACE: u64 = 0x4_00000; // 4MB
-//const KERNEL_VIR_START: u64 = 0o1_000_000_0000 - 0o1_000_0000; // 1GB - 2MB
-//const KERNEL_PHY_START: u64 = 0o1_000_0000; // 2MB
-//const PAGE_SIZE: u64 = 0o1_0000; // 4KB
-
-pub static mut SYSTEM_FRAME_POOL : *mut SimpleFramePool = (0x0 as *mut SimpleFramePool);
-pub static mut USER_FRAME_POOL : *mut SimpleFramePool = (0x0 as *mut SimpleFramePool);
+static mut SYSTEM_FRAME_POOL : *mut SimpleFramePool = (0x0 as *mut SimpleFramePool);
+static mut USER_FRAME_POOL : *mut SimpleFramePool = (0x0 as *mut SimpleFramePool);
 
 pub struct SimpleFramePool { // manages frames from i (510*8*8) till i+1 (510*8*8)
     start_frame: u64,
     next : *mut SimpleFramePool,
-//    frames : *mut u8
     frames: [u8; 4080] // because 8 u8s are gone for the start frame
 }
 
@@ -39,8 +33,28 @@ impl SimpleFramePool {
         self.next = 0x0 as *mut SimpleFramePool;
     }
 
-    fn add_frame_pool(&mut self, next : *mut SimpleFramePool) {
-        self.next = next;
+    fn get_next(&self) -> Option<& SimpleFramePool> {
+        unsafe {
+            if self.next as u64 == 0x0 {
+                None
+            } else {
+                Some(&(*self.next))
+            }
+        }
+    }
+
+    fn get_next_mut(&self) -> Option<&mut SimpleFramePool> {
+        unsafe {
+            if self.next as u64 == 0x0 {
+                None
+            } else {
+                Some(&mut (*self.next))
+            }
+        }
+    }
+
+    fn set_next(&mut self, next : &mut SimpleFramePool) {
+        self.next = &mut (*next)
     }
 
     fn mark_free_block(mut old_value : u8, start : u8, end : u8) -> u8 {
@@ -129,21 +143,26 @@ impl SimpleFramePool {
         return None;
     }
 
-    pub fn free_frame(frame : PhysFrame) {
+    fn free_frame(frame : PhysFrame) {
         let frame_addr : u64 = frame.start_address().as_u64();
-        unsafe {
-            let mut fp: *mut SimpleFramePool = SYSTEM_FRAME_POOL;
-            loop {
-                if (*fp).next == 0x0 as *mut SimpleFramePool || (*(*fp).next).start_frame > frame_addr {
-                    (*fp).mark_free((frame_addr - (*fp).start_frame) / crate::machine::PAGE_SIZE, (frame_addr - (*fp).start_frame) / crate::machine::PAGE_SIZE + 1);
-                    break
-                }
-                fp = (*fp).next;
+        let mut fp = get_frame_pool_mut(true);
+        loop {
+            if fp.get_next_mut().is_none() {
+                fp.mark_free((frame_addr - fp.start_frame) / crate::machine::PAGE_SIZE, (frame_addr - fp.start_frame) / crate::machine::PAGE_SIZE + 1);
+                break
+            }
+
+            if  fp.get_next_mut().unwrap().start_frame > frame_addr {
+                fp.mark_free((frame_addr - fp.start_frame) / crate::machine::PAGE_SIZE, (frame_addr - fp.start_frame) / crate::machine::PAGE_SIZE + 1);
+                break
+            } else {
+                fp = fp.get_next_mut().unwrap();
             }
         }
+
     }
 
-    pub fn print_frame_map(& self) {
+    fn print_frame_map(& self) {
         let x = self.frames;
         for i in 155..170 {
             serial_print!("{:08b} ", x[i]);
@@ -166,20 +185,18 @@ impl FrameDeallocator<Size4KiB> for SimpleFramePool {
 
 pub fn get_frame(kernel: bool, raw: bool) -> Option<PhysFrame> {
     if kernel {
-        unsafe {
-            let frame = (*SYSTEM_FRAME_POOL).allocate_frame();
-            if frame.is_none() {
-                return None;
-            };
-            if raw {
-                frame
-            } else {
-                let virt_addr = transform_kernel_to_vir(frame.unwrap().start_address());
-                Some(PhysFrame::containing_address(PhysAddr::new(virt_addr.as_u64())))
-            }
+        let frame = get_frame_pool_mut(true).allocate_frame();
+        if frame.is_none() {
+            return None;
+        };
+        if raw {
+            frame
+        } else {
+            let virt_addr = transform_kernel_to_vir(frame.unwrap().start_address());
+            Some(PhysFrame::containing_address(PhysAddr::new(virt_addr.as_u64())))
         }
     } else {
-        unsafe { (*USER_FRAME_POOL).allocate_frame()}
+        get_frame_pool_mut(false).allocate_frame()
     }
 }
 
@@ -187,11 +204,12 @@ pub fn free_frame(frame : PhysFrame) {
     SimpleFramePool::free_frame(frame)
 }
 
-pub fn print_frame_map() {
-    unsafe {(*SYSTEM_FRAME_POOL).print_frame_map()};
+#[allow(dead_code)]
+fn print_frame_map() {
+    get_frame_pool_mut(true).print_frame_map();
 }
 
-//#[allow(dead_code)]
+#[allow(dead_code)]
 pub fn transform_kernel_to_vir(addr: PhysAddr) -> VirtAddr {
     VirtAddr::new(addr.as_u64() - crate::machine::KERNEL_PHY_START + crate::machine::KERNEL_VIR_START)
 }
@@ -220,23 +238,59 @@ pub fn init_frame_allocator(
     for region in regions {
         if region.range.end_addr() <= crate::machine::KERNEL_SPACE {
             let sys_frame_addr = transform_kernel_to_vir(PhysAddr::new(region.range.start_addr()));
-            unsafe {
-                SYSTEM_FRAME_POOL = sys_frame_addr.as_u64() as *mut SimpleFramePool;
-                (*SYSTEM_FRAME_POOL).init(crate::machine::KERNEL_PHY_START);
-                (*SYSTEM_FRAME_POOL).mark_free(
-                    (region.range.start_addr() - crate::machine::KERNEL_PHY_START)/crate::machine::PAGE_SIZE + 1,
-                    (region.range.end_addr() - crate::machine::KERNEL_PHY_START)/crate::machine::PAGE_SIZE);
-            };
+            set_system_frame_pool(sys_frame_addr.as_u64() as *mut SimpleFramePool);
+            get_frame_pool_mut(true).init(crate::machine::KERNEL_PHY_START);
+            get_frame_pool_mut(true).mark_free(
+                (region.range.start_addr() - crate::machine::KERNEL_PHY_START)/crate::machine::PAGE_SIZE + 1,
+                (region.range.end_addr() - crate::machine::KERNEL_PHY_START)/crate::machine::PAGE_SIZE);
         } else {
-            unsafe {
-                let user_frame_addr = get_frame(true, false).unwrap().start_address();
-                USER_FRAME_POOL = user_frame_addr.as_u64() as *mut SimpleFramePool;
-                (*SYSTEM_FRAME_POOL).add_frame_pool(USER_FRAME_POOL);
-                (*USER_FRAME_POOL).init(crate::machine::KERNEL_SPACE);
-                (*USER_FRAME_POOL).mark_free(
-                    (region.range.start_addr() - crate::machine::KERNEL_SPACE)/crate::machine::PAGE_SIZE,
-                    (region.range.end_addr() - crate::machine::KERNEL_SPACE)/crate::machine::PAGE_SIZE);
-            };
+            let user_frame_addr = get_frame(true, false).unwrap().start_address();
+            set_user_frame_pool(user_frame_addr.as_u64() as *mut SimpleFramePool);
+            get_frame_pool_mut(true).set_next(get_frame_pool_mut(false));
+            get_frame_pool_mut(false).init(crate::machine::KERNEL_SPACE);
+            get_frame_pool_mut(false).mark_free(
+                (region.range.start_addr() - crate::machine::KERNEL_SPACE)/crate::machine::PAGE_SIZE,
+                (region.range.end_addr() - crate::machine::KERNEL_SPACE)/crate::machine::PAGE_SIZE);
         }
+    }
+}
+
+#[allow(dead_code)]
+pub fn get_frame_pool(kernel : bool) -> &'static SimpleFramePool {
+    if kernel {
+        unsafe {
+            & (*SYSTEM_FRAME_POOL)
+        }
+    } else {
+        unsafe {
+            & (*USER_FRAME_POOL)
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub fn get_frame_pool_mut(kernel : bool) -> &'static mut SimpleFramePool {
+    if kernel {
+        unsafe {
+            &mut (*SYSTEM_FRAME_POOL)
+        }
+    } else {
+        unsafe {
+            &mut (*USER_FRAME_POOL)
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn set_system_frame_pool(fp : *mut SimpleFramePool) {
+    unsafe {
+        SYSTEM_FRAME_POOL = fp;
+    }
+}
+
+#[allow(dead_code)]
+fn set_user_frame_pool(fp : *mut SimpleFramePool) {
+    unsafe {
+        USER_FRAME_POOL = fp;
     }
 }
