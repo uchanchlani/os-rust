@@ -9,3 +9,5 @@ pub const HEAP_SIZE : u64 = 0o1_000_000_0000;
 pub const L4_PAGE_TABLE_VADDR : u64 = 0o1_77777_777_777_777_777_0000;
 pub const L3_PAGE_TABLE_VADDR : u64 = 0o1_77777_777_777_777_000_0000;
 pub const L2_PAGE_TABLE_VADDR : u64 = 0o1_77777_777_777_000_000_0000;
+
+pub type CFunc = extern "C" fn();

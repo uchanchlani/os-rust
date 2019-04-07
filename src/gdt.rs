@@ -53,3 +53,7 @@ pub fn init() {
         load_tss(GDT.1.tss_selector);
     }
 }
+
+pub fn get_cs() -> u64 {
+    u64::from(GDT.1.code_selector.0)
+}

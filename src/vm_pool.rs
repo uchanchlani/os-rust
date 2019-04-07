@@ -1,7 +1,8 @@
 use crate::{
-    process_table::ProcessTable
+    process_table::MyProcess
 };
 use x86_64::VirtAddr;
+use core::fmt::{Formatter, Error};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
@@ -29,6 +30,8 @@ impl VMPoolEntry {
     }
 }
 
+//#[derive(Debug)]
+#[repr(C)]
 pub struct VMPool {
     start_addr: VirtAddr,
     pool_size : u64,
@@ -105,11 +108,17 @@ impl VMPool {
                 for i in 0..entry.size {
                     let mut free_addr : u64 = entry.start.as_u64();
                     free_addr += i*crate::machine::PAGE_SIZE;
-                    ProcessTable::free_page(VirtAddr::new(free_addr));
+                    MyProcess::free_page(VirtAddr::new(free_addr));
                 }
                 entry.free_entry();
                 break;
             }
         }
+    }
+}
+
+impl core::fmt::Debug for VMPool {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write!(f, "")
     }
 }

@@ -2,6 +2,7 @@
 #![cfg_attr(not(test), no_std)] // don't link the Rust standard library
 #![feature(abi_x86_interrupt)]
 #![feature(asm)]
+#![feature(naked_functions)]
 
 pub mod machine;
 pub mod vga_buffer;

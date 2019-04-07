@@ -5,7 +5,7 @@
 use blog_os::{exit_qemu, serial_println};
 use bootloader::{bootinfo::BootInfo, entry_point};
 use core::panic::PanicInfo;
-use blog_os::process_table::ProcessTable;
+use blog_os::process_table::MyProcess;
 //use core::mem::size_of;
 
 entry_point!(kernel_main);
@@ -20,13 +20,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     blog_os::interrupts::init_pics();
     blog_os::interrupts::enable_interrupts();
 
-    let _cr3 = x86_64::registers::control::Cr3::read();
-
-    blog_os::process_table::fix_cr3();
     blog_os::memory::init_frame_allocator(&boot_info.memory_map);
 
-    let mut page_table : &'static mut ProcessTable = ProcessTable::new();
-    page_table = page_table.load();
+    let mut page_table : &'static mut MyProcess = MyProcess::new((process_function as blog_os::machine::CFunc));
+    page_table = page_table.load_page_table();
     let x = &mut page_table.vm_pool;
     let addr = x.allocate(core::mem::size_of::<[u64; 10000]>()).unwrap();
     let test_mem : &mut [u64; 10000] = unsafe {&mut *(addr.as_u64() as *mut [u64; 10000])};
@@ -57,5 +54,9 @@ fn panic(info: &PanicInfo) -> ! {
 
     unsafe { exit_qemu(); }
     blog_os::hlt_loop();
+}
+
+extern "C" fn process_function() {
+    serial_println!("process function");
 }
 

@@ -1,8 +1,5 @@
-//#![feature(const_raw_ptr_deref)]
-
 use x86_64::{
     registers::control::Cr3,
-    registers::control::Cr3Flags,
     registers::control::Cr2,
     structures::{
         idt::{
@@ -26,48 +23,71 @@ use crate::{
 };
 use x86_64::structures::paging::{Mapper, Page};
 
-static mut CURR_PROCESS_TABLE: *mut ProcessTable = 0x0 as *mut ProcessTable;
+static mut CURR_PROCESS_TABLE: *mut MyProcess = 0x0 as *mut MyProcess;
+static mut NEXT_PROCESS: *mut MyProcess = 0x0 as *mut MyProcess;
 
 #[allow(dead_code)]
-fn get_curr_process_table() -> &'static ProcessTable {
+fn get_curr_process_table() -> &'static MyProcess {
     unsafe {
         & (*CURR_PROCESS_TABLE)
     }
 }
 
 #[allow(dead_code)]
-fn get_curr_process_table_mut() -> &'static mut ProcessTable {
+fn get_curr_process_table_mut() -> &'static mut MyProcess {
     unsafe {
         &mut (*CURR_PROCESS_TABLE)
     }
 }
 
 #[allow(dead_code)]
-fn set_curr_process_table(pt : &mut ProcessTable) {
+fn set_curr_process_table(pt : &mut MyProcess) {
     unsafe {
         CURR_PROCESS_TABLE = &mut (*pt)
     }
 }
 
-#[repr(C)]
-pub struct ProcessTable {
-    pub pg_dir_phy : PhysAddr,
-    pub page_directory : VirtAddr,
-    pub vm_pool : &'static mut VMPool
-}
-
-pub fn fix_cr3() {
+#[allow(dead_code)]
+pub fn set_next_process(pt : &mut MyProcess) {
     unsafe {
-        let frame = Cr3::read();
-        Cr3::write(frame.0, Cr3Flags::PAGE_LEVEL_WRITETHROUGH);
+        NEXT_PROCESS = &mut (*pt)
     }
 }
 
-impl ProcessTable {
+static mut NEXT_PROCESS_ID : u16 = 0;
+
+fn faa_next_proc_id() -> u16 {
+    unsafe {
+        NEXT_PROCESS_ID+=1;
+        NEXT_PROCESS_ID
+    }
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct MyProcess {
+    esp : u64,
+    pg_dir_phy : PhysAddr,
+    page_directory : VirtAddr,
+    process_id : u16,
+    stack_size : u16,
+    started : bool,
+    terminated : bool,
+    pub vm_pool : &'static mut VMPool,
+    next : *mut MyProcess
+}
+
+fn get_page_table_from_addr(addr : u64) -> &'static mut PageTable {
+    unsafe {
+        &mut *(addr as *mut PageTable)
+    }
+}
+
+impl MyProcess {
     fn construct_page_table(& self) {
         let pg_table_addr = self.page_directory;
-        let dest_table = unsafe {&mut *(pg_table_addr.as_u64() as *mut PageTable)};
-        let source_table = unsafe{&mut *(crate::machine::L4_PAGE_TABLE_VADDR as *mut PageTable)};
+        let dest_table = get_page_table_from_addr(pg_table_addr.as_u64());
+        let source_table = get_page_table_from_addr(crate::machine::L4_PAGE_TABLE_VADDR);
         let p3_frame = crate::memory::get_frame(true, true).unwrap();
         dest_table.zero();
         dest_table[0].set_addr(p3_frame.start_address(), Flags::PRESENT | Flags::WRITABLE);
@@ -81,33 +101,89 @@ impl ProcessTable {
         }
 
         let p3_addr_vir = crate::memory::transform_kernel_to_vir(p3_frame.start_address());
-        let source_table1 = unsafe{&mut *(crate::machine::L3_PAGE_TABLE_VADDR as *mut PageTable)};
-        let dest_table1 = unsafe {&mut *(p3_addr_vir.as_u64() as *mut PageTable)};
+        let source_table1 = get_page_table_from_addr(crate::machine::L3_PAGE_TABLE_VADDR);
+        let dest_table1 = get_page_table_from_addr(p3_addr_vir.as_u64());
         dest_table1.zero();
         dest_table1[0].set_addr(source_table1[0].addr(), source_table1[0].flags());
 
     }
 
-    pub fn new() -> &'static mut Self {
+    fn push(&mut self, val : u64) {
+        self.esp -= 8;
+        unsafe {
+            *(self.esp as *mut u64) = val;
+        }
+    }
+
+    fn construct_stack(&mut self, p_func_ptr : crate::machine::CFunc, _stack_size: u64) {
+        let old_cr3 = Cr3::read();
+        let old_pt = get_curr_process_table_mut();
+        unsafe {
+            set_curr_process_table(self);
+            Cr3::write(PhysFrame::containing_address(self.pg_dir_phy), old_cr3.1);
+        }
+
+        let stack_frame = self.vm_pool.allocate(_stack_size as usize);
+        self.stack_size = _stack_size as u16;
+        self.esp = stack_frame.unwrap().as_u64() + _stack_size as u64;
+
+        let pe = ((process_end as crate::machine::CFunc) as *const extern "C" fn()) as u64;
+        self.push(pe);
+        let pf = (p_func_ptr as *const extern "C" fn()) as u64;
+        self.push(pf);
+
+        let curr_esp = self.esp;
+
+
+        self.push(0 as u64); // ss register
+        self.push(curr_esp); // rsp register
+        self.push(0 as u64); // rflags
+        let cs = crate::gdt::get_cs();
+        self.push(cs); // CS
+        let ps = ((process_start as crate::machine::CFunc) as *const extern "C" fn()) as u64;
+        self.push(ps);
+
+//        for i in 0..16 {
+//            self.push(0 as u64);
+//        } // 16 general purpose registers
+
+        unsafe {
+            Cr3::write(old_cr3.0, old_cr3.1);
+            set_curr_process_table(old_pt);
+        }
+    }
+
+    pub fn new(p_func_ptr : crate::machine::CFunc) -> &'static mut Self {
+        crate::interrupts::disable_interrupts();
+
+        // init process instance
         let frame = crate::memory::get_frame(true, false);
-        let page_table : &mut ProcessTable = unsafe {&mut *(frame.unwrap().start_address().as_u64() as *mut ProcessTable)};
+        let fr_addr = frame.unwrap().start_address().as_u64();
+        let my_process : &mut MyProcess = unsafe {&mut *(fr_addr as *mut MyProcess)};
 
-        page_table.pg_dir_phy = crate::memory::get_frame(true, true).unwrap().start_address();
-        page_table.page_directory = crate::memory::transform_kernel_to_vir(page_table.pg_dir_phy);
+        my_process.pg_dir_phy = crate::memory::get_frame(true, true).unwrap().start_address();
+        my_process.page_directory = crate::memory::transform_kernel_to_vir(my_process.pg_dir_phy);
 
-        page_table.construct_page_table();
+        my_process.construct_page_table();
 
         // VMPool Starts at 1GB and is of size 1GB
         let vm_page = crate::memory::get_frame(true, false).unwrap().start_address().as_u64();
-        page_table.vm_pool = unsafe {&mut *(vm_page as *mut VMPool)};
-        page_table.vm_pool.new(
+        my_process.vm_pool = unsafe {&mut *(vm_page as *mut VMPool)};
+        my_process.vm_pool.new(
             crate::machine::HEAP_START,
             crate::machine::HEAP_SIZE);
 
-        page_table
+
+        my_process.next = 0x0 as *mut MyProcess;
+        my_process.process_id = faa_next_proc_id();
+
+        my_process.construct_stack(p_func_ptr, 8192);
+
+        crate::interrupts::enable_interrupts();
+        my_process
     }
 
-    pub fn load(&'static mut self) -> &'static mut Self {
+    pub fn load_page_table(&'static mut self) -> &'static mut Self {
         set_curr_process_table(self);
         unsafe {
             Cr3::write(PhysFrame::containing_address(self.pg_dir_phy), Cr3::read().1);
@@ -117,6 +193,7 @@ impl ProcessTable {
 
     pub fn handle_fault(_addr : VirtAddr) -> bool {
         unsafe {
+
             let vm_pool = &get_curr_process_table().vm_pool;
             if vm_pool.is_legitimate(_addr) {
                 let level_4_table_ptr = crate::machine::L4_PAGE_TABLE_VADDR as *mut PageTable;
@@ -181,7 +258,7 @@ pub extern "x86-interrupt" fn page_fault_handler(
 ) {
     let addr = Cr2::read();
 
-    if !ProcessTable::handle_fault(addr) {
+    if !MyProcess::handle_fault(addr) {
         println!("EXCEPTION: PAGE FAULT");
         println!("Accessed Address: {:?}", addr);
         println!("{:#?}", stack_frame);
@@ -189,3 +266,32 @@ pub extern "x86-interrupt" fn page_fault_handler(
     }
 }
 
+#[naked]
+pub extern "C" fn process_switch_to() {
+    unsafe {
+        asm!("mov $0, $1
+              mov rbx, $0"
+        : "=r"(CURR_PROCESS_TABLE)
+        : "r"(NEXT_PROCESS)
+        ::"volatile", "intel");
+
+        asm!("mov rax, [rbx+8]
+              mov rsp, [rbx]
+              mov cr3, rax
+              iretq"
+        ::::"volatile", "intel");
+    }
+}
+
+extern "C" fn process_start() {
+    unsafe {
+        get_curr_process_table_mut().started = true;
+        crate::interrupts::enable_interrupts();
+    }
+}
+
+extern "C" fn process_end() {
+    unsafe {
+        crate::hlt_loop();
+    }
+}
