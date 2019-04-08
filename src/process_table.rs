@@ -27,7 +27,7 @@ static mut CURR_PROCESS_TABLE: *mut MyProcess = 0x0 as *mut MyProcess;
 static mut NEXT_PROCESS: *mut MyProcess = 0x0 as *mut MyProcess;
 
 #[allow(dead_code)]
-fn get_curr_process_table() -> &'static MyProcess {
+pub fn get_curr_process_table() -> &'static MyProcess {
     unsafe {
         & (*CURR_PROCESS_TABLE)
     }
@@ -69,7 +69,7 @@ pub struct MyProcess {
     esp : u64,
     pg_dir_phy : PhysAddr,
     page_directory : VirtAddr,
-    process_id : u16,
+    pub process_id : u16,
     stack_size : u16,
     started : bool,
     terminated : bool,
@@ -143,9 +143,9 @@ impl MyProcess {
         let ps = ((process_start as crate::machine::CFunc) as *const extern "C" fn()) as u64;
         self.push(ps);
 
-//        for i in 0..16 {
-//            self.push(0 as u64);
-//        } // 16 general purpose registers
+        for _i in 0..15 {
+            self.push(0 as u64);
+        } // 16 general purpose registers - the stack register
 
         unsafe {
             Cr3::write(old_cr3.0, old_cr3.1);
@@ -266,9 +266,78 @@ pub extern "x86-interrupt" fn page_fault_handler(
     }
 }
 
+macro_rules! save_all_registers {
+    () => {
+        asm!("push rax
+              push rbx
+              push rcx
+              push rdx
+              push rsi
+              push rdi
+              push rbp
+              push r8
+              push r9
+              push r10
+              push r11
+              push r12
+              push r13
+              push r14
+              push r15
+        " :::: "intel", "volatile");
+    }
+}
+
+macro_rules! restore_all_registers {
+    () => {
+        asm!("pop r15
+              pop r14
+              pop r13
+              pop r12
+              pop r11
+              pop r10
+              pop r9
+              pop r8
+              pop rbp
+              pop rdi
+              pop rsi
+              pop rdx
+              pop rcx
+              pop rbx
+              pop rax
+        " :::: "intel", "volatile");
+    }
+}
+
 #[naked]
 pub extern "C" fn process_switch_to() {
     unsafe {
+        if !(CURR_PROCESS_TABLE as u64 == 0x0) {
+            asm!("
+                  mov [rsp-40], rax
+                  mov rax, [rsp+0]
+                  mov [rsp-32], rax
+                  add rsp, 8
+                  mov rax, 0x0
+                  push rax
+                  mov rax, rsp
+                  add rax, 8
+                  push rax
+                  pushfq
+                  mov rax, 0x8
+                  push rax
+                  sub rsp, 8
+                  mov rax, [rsp-8]
+                  "
+            ::::"volatile", "intel");
+
+            save_all_registers!();
+
+            asm!("mov rax, $0
+                  mov [rax+0], rsp"
+            : "=r"(CURR_PROCESS_TABLE)
+            ::: "volatile", "intel");
+        }
+
         asm!("mov $0, $1
               mov rbx, $0"
         : "=r"(CURR_PROCESS_TABLE)
@@ -277,21 +346,21 @@ pub extern "C" fn process_switch_to() {
 
         asm!("mov rax, [rbx+8]
               mov rsp, [rbx]
-              mov cr3, rax
-              iretq"
+              mov cr3, rax"
         ::::"volatile", "intel");
+
+        restore_all_registers!();
+
+        asm!("iretq" ::::"volatile", "intel");
+
     }
 }
 
 extern "C" fn process_start() {
-    unsafe {
-        get_curr_process_table_mut().started = true;
-        crate::interrupts::enable_interrupts();
-    }
+    get_curr_process_table_mut().started = true;
+    crate::interrupts::enable_interrupts();
 }
 
 extern "C" fn process_end() {
-    unsafe {
-        crate::hlt_loop();
-    }
+    crate::hlt_loop();
 }

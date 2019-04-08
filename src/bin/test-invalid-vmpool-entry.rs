@@ -22,7 +22,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     blog_os::memory::init_frame_allocator(&boot_info.memory_map);
 
-    let mut page_table : &'static mut MyProcess = MyProcess::new((process_function as blog_os::machine::CFunc));
+    let mut page_table : &'static mut MyProcess = MyProcess::new(process_function as blog_os::machine::CFunc);
     page_table = page_table.load_page_table();
     let x = &mut page_table.vm_pool;
     let addr = x.allocate(core::mem::size_of::<[u64; 10000]>()).unwrap();
