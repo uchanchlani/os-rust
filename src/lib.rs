@@ -12,6 +12,7 @@ pub mod gdt;
 pub mod memory;
 pub mod process_table;
 pub mod vm_pool;
+pub mod scheduler;
 
 pub unsafe fn exit_qemu() {
     use x86_64::instructions::port::Port;

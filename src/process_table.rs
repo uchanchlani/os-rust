@@ -233,6 +233,23 @@ impl MyProcess {
         &mut self.vm_pool
     }
 
+    pub fn get_next(& self) -> Option<&mut MyProcess> {
+        return if self.next == (0x0 as *mut MyProcess) {
+            None
+        } else {
+            unsafe {
+                Some(&mut (*self.next))
+            }
+        }
+    }
+
+    pub fn set_next(&mut self, next : Option<&mut MyProcess>) {
+        match next {
+            Some(val) => self.next = &mut (*val),
+            None => self.next = 0x0 as *mut MyProcess
+        }
+    }
+
 }
 
 pub unsafe fn print_pg_tables(table: u64) {
