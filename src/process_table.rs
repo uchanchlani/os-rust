@@ -34,7 +34,7 @@ pub fn get_curr_process_table() -> &'static MyProcess {
 }
 
 #[allow(dead_code)]
-fn get_curr_process_table_mut() -> &'static mut MyProcess {
+pub fn get_curr_process_table_mut() -> &'static mut MyProcess {
     unsafe {
         &mut (*CURR_PROCESS_TABLE)
     }
