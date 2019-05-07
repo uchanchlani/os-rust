@@ -64,6 +64,7 @@ extern "C" fn process_function2() {
 //        serial_println!("proc 2 -> {}", i);
         blog_os::scheduler::_yield();
     }
+    serial_println!("failed");
     unsafe { exit_qemu(); }
     blog_os::hlt_loop();
 }
@@ -73,6 +74,7 @@ extern "C" fn process_function3() {
 //        serial_println!("proc 3 -> {}", i);
         blog_os::scheduler::_yield();
     }
+    serial_println!("failed");
     unsafe { exit_qemu(); }
     blog_os::hlt_loop();
 }

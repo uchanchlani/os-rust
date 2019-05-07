@@ -349,6 +349,7 @@ pub extern "C" fn process_switch_to() {
 
             save_all_registers!();
 
+            // Save the current rsp value in the process structure.
             asm!("mov rax, $0
                   mov [rax+0], rsp"
             : "=r"(CURR_PROCESS_TABLE)
