@@ -4,7 +4,18 @@
 
 use core::panic::PanicInfo;
 use blog_os::println;
+use blog_os::serial_println;
 use bootloader::{bootinfo::BootInfo, entry_point};
+use x86_64::{
+    structures::{
+        paging::{
+            PhysFrame,
+            Size4KiB,
+            PageTable,
+            RecursivePageTable
+        }
+    }
+};
 
 entry_point!(kernel_main);
 
@@ -23,17 +34,23 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     blog_os::interrupts::init_pics();
     blog_os::interrupts::enable_interrupts();
 
-    use blog_os::memory::{self, translate_addr};
+    use blog_os::memory::{self};
 
-    let mut recursive_page_table = unsafe {
-        memory::init(boot_info.p4_table_addr as usize)
+    let recursive_page_table = unsafe {
+//        let cr3 = x86_64::registers::control::Cr3::read();
+
+
+        memory::init_frame_allocator(&boot_info.memory_map);
+
+        let level_4_table_ptr = boot_info.p4_table_addr as *mut PageTable;
+        let level_4_table = &mut *level_4_table_ptr;
+        RecursivePageTable::new(level_4_table).unwrap()
     };
 
-    let mut frame_allocator = memory::init_frame_allocator(&boot_info.memory_map);
-    blog_os::memory::create_example_mapping(&mut recursive_page_table, &mut frame_allocator);
-
-    println!("0xdeadbeaf900 -> {:?}", translate_addr(0xdeadbeaf900, &recursive_page_table));
-    unsafe { (0xdeadbeaf900 as *mut u64).write_volatile(0xf021f077f065f04e)};
+    let frame = x86_64::registers::control::Cr3::read();
+    let x : PhysFrame<Size4KiB> = frame.0;
+    println!("{:x}", boot_info.p4_table_addr);
+    serial_println!("{:x}", boot_info.p4_table_addr);
 
     println!("It did not crash!");
     blog_os::hlt_loop();

@@ -2,15 +2,15 @@ use x86_64::{
     structures::{
         idt::{
             InterruptDescriptorTable,
-            ExceptionStackFrame,
-            PageFaultErrorCode
+            ExceptionStackFrame
         }
     }
 };
 use crate::{
     println,
     print,
-    gdt
+    gdt,
+    process_table::page_fault_handler
 };
 use lazy_static::lazy_static;
 use pic8259_simple::ChainedPics;
@@ -74,19 +74,6 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
     unsafe { PICS.lock().notify_end_of_interrupt(KEYBOARD_INTERRUPT_ID) }
 }
 
-extern "x86-interrupt" fn page_fault_handler(
-    stack_frame: &mut ExceptionStackFrame,
-    _error_code: PageFaultErrorCode,
-) {
-    use crate::hlt_loop;
-    use x86_64::registers::control::Cr2;
-
-    println!("EXCEPTION: PAGE FAULT");
-    println!("Accessed Address: {:?}", Cr2::read());
-    println!("{:#?}", stack_frame);
-    hlt_loop();
-}
-
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
@@ -118,4 +105,8 @@ pub fn init_pics() {
 
 pub fn enable_interrupts() {
     x86_64::instructions::interrupts::enable();
+}
+
+pub fn disable_interrupts() {
+    x86_64::instructions::interrupts::disable();
 }
